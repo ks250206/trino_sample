@@ -17,8 +17,8 @@
   - iceberg用オブジェクトストレージ
     - s3互換ストレージとして使用 
   - port: 9000と9001(GUIは後者) 
-- postgre_iceberg
-  - カタログ用RDB
+- postgres_iceberg
+  - icebergカタログ用RDB
   -  port: 5433 
 
 
