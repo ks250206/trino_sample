@@ -20,3 +20,26 @@
 - postgre_iceberg
   - カタログ用RDB
   -  port: 5433 
+
+
+## trinoでテーブルを作成するコマンドの例
+```sql
+-- 倉庫配下の任意のサブパスをスキーマの location に
+CREATE SCHEMA iceberg.minio
+WITH (location = 's3a://lakehouse/warehouse/minio/');
+
+-- テーブルを作成
+CREATE TABLE iceberg.minio.samples (
+  id INTEGER,
+  name VARCHAR,
+  value DOUBLE
+)
+WITH (
+  format = 'PARQUET'
+);
+
+INSERT INTO iceberg.minio.samples VALUES (1, 'a', 3.14);
+
+SELECT * FROM iceberg.minio.samples;
+
+```
