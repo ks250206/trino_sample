@@ -1,0 +1,168 @@
+
+services:
+  trino:
+    image: 'trinodb/trino:latest'
+    container_name : trino
+    hostname: trino
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./catalog:/etc/trino/catalog
+
+  postgres:
+    image: postgres:17
+    container_name: postgres
+    hostname: postgres
+    user: "999:999"
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mydb}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mypassword}
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+      TZ: ${TZ:-Asia/Tokyo}
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/logs:/var/log/postgresql
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # 初期化SQLを置く場合（任意）:
+      - ./postgres/initdb.d/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./postgres/initdb.d/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h 127.0.0.1 -p 5432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  pgadmin4:
+    image: dpage/pgadmin4:9.8.0
+    container_name: pgadmin
+    ports:
+      - "8083:80"
+    volumes:
+      - ./pgadmin/pgadmin-data:/var/lib/pgadmin
+      - ./pgadmin/pgadmin_servers.json:/pgadmin4/servers.json:ro
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${POSTGRES_PASSWORD:-mypassword}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      TZ: ${TZ:-Asia/Tokyo}
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  mongodb:
+    container_name: mongodb
+    hostname: mongodb
+    image: mongo:8
+    restart: always
+    ports:
+      - '27017:27017'
+    volumes:
+      - ./mongodb/initdb.d:/docker-entrypoint-initdb.d
+      - ./mongodb/data:/data/db
+      - ./mongodb/configdb:/data/configdb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-mongo}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-mypassword}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-mydb}
+      TZ: ${TZ:-Asia/Tokyo}
+
+  mongo-express:
+    image: mongo-express
+    container_name: mongo-express
+    restart: always
+    ports:
+      - '8084:8081'
+    environment:
+      ME_CONFIG_MONGODB_URL: ${ME_CONFIG_MONGODB_URL:-mongodb://mongo:mypassword@mongodb:27017/?ssl=false}
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${ME_CONFIG_MONGODB_ADMINUSERNAME:-mongo}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${ME_CONFIG_MONGODB_ADMINPASSWORD:-mypassword}
+      ME_CONFIG_MONGODB_SERVER: ${ME_CONFDIG_MONGODB_SERVER:-mongodb}
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: password
+    depends_on:
+      - mongodb
+ 
+  minio:
+    image: quay.io/minio/minio
+    container_name: minio
+    hostname: minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-mypassword}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./minio/data:/data
+    command: server --console-address ":9001" /data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+    restart: unless-stopped
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-mypassword}
+      BUCKETS: "lakehouse"
+
+    entrypoint: ["/bin/sh","-c",
+      "set -eu;
+       mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\";
+       until mc ready local >/dev/null 2>&1 || mc ls local >/dev/null 2>&1; do
+         echo 'waiting for minio...'; sleep 2;
+       done;
+       for b in $(echo \"$$BUCKETS\" | tr ',' ' '); do
+         [ -z \"$$b\" ] && continue;
+         mc ls \"local/$$b\" >/dev/null 2>&1 || mc mb \"local/$$b\";
+         mc anonymous set public local/\"$$b\" || true;
+         mc version enable local/\"$$b\" || true;
+       done;
+       echo 'buckets initialized.'"
+    ]
+
+    restart: no
+
+  postgres_iceberg:
+    image: postgres:17
+    container_name: postgres_iceberg
+    hostname: postgres_iceberg
+    user: "999:999"
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-iceberg}
+      POSTGRES_USER: ${POSTGRES_USER:-iceberg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+      TZ: ${TZ:-Asia/Tokyo}
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    volumes:
+      - ./postgres_iceberg/data:/var/lib/postgresql/data
+      - ./postgres_iceberg/logs:/var/log/postgresql
+      - ./postgres_iceberg/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # 初期化SQLを置く場合（任意）:
+      - ./postgres_iceberg/initdb.d/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      #- ./postgres_iceberg/initdb.d/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h 127.0.0.1 -p 5432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+

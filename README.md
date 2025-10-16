@@ -1,0 +1,22 @@
+# trino_sample
+
+分散SQLエンジンのテスト用リポジトリ
+
+## 構成
+- trino
+- postgres
+  - port: 5432 
+- pgadmin4
+  - postgres用GUI
+  - port: 8083
+- mongodb
+- mongo-express
+  - mongodb用GUI
+  -  port: 8084 
+- minio
+  - iceberg用オブジェクトストレージ
+    - s3互換ストレージとして使用 
+  - port: 9000と9001(GUIは後者) 
+- postgre_iceberg
+  - カタログ用RDB
+  -  port: 5433 
